@@ -8,6 +8,7 @@ import struct
 from refinery.units.crypto.cipher.salsa import LatinCipher, LatinX
 from refinery.units.crypto.cipher import LatinCipherUnit, LatinCipherStandardUnit
 from refinery.lib.crypto import rotl32, PyCryptoFactoryWrapper
+from refinery.units.meta import Arg
 
 
 class ChaChaCipher(LatinCipher):
@@ -43,8 +44,27 @@ class chacha20(LatinCipherStandardUnit, cipher=PyCryptoFactoryWrapper(ChaCha20))
     but this unit uses the PyCryptodome library C implementation rather than the pure
     Python implementation used by `refinery.chacha`.
     """
-    pass
+    def __init__(self,
+        key, nonce,
+        poly1305: Arg('--poly1305', action="store_true", help='Use ChaCha20-Poly1305 instead of ChaCha20. Only implemented for decryption.') = None,
+    ):
+        super().__init__(key, nonce)
+        self.poly1305 = poly1305
 
+    def decrypt(self, data: bytes) -> bytes:
+        cipher = self._get_cipher(True)
+        if self.poly1305:
+            cipher.seek(64)
+        assert cipher.block_size == self.block_size
+        try:
+            return cipher.decrypt(data)
+        except ValueError:
+            overlap = len(data) % self.block_size
+            if not overlap:
+                raise
+            data[-overlap:] = []
+            self.log_warn(F'removing {overlap} bytes from the input to make it a multiple of the {self.block_size}-byte block size')
+            return cipher.decrypt(data)
 
 class chacha20poly1305(LatinCipherStandardUnit, cipher=PyCryptoFactoryWrapper(ChaCha20_Poly1305)):
     """
