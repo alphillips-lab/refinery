@@ -80,7 +80,7 @@ class vstack(Unit):
         import intervaltree
         return intervaltree
 
-    @Unit.Requires('unicorn', 'default', 'extended')
+    @Unit.Requires('unicorn==2.0.1.post1', 'default', 'extended')
     def _unicorn():
         with NoLogging():
             import unicorn
@@ -448,7 +448,7 @@ class vstack(Unit):
         try:
             state.ticks -= 1
             state.visits[address] += 1
-            if state.visits[address] > state.max_loop:
+            if state.visits[address] > state.max_loop > 0:
                 self.log_info(
                     F'aborting emulation: 0x{address:0{state.executable.pointer_size // 8}X}'
                     F' was visited more than {state.max_loop} times.')

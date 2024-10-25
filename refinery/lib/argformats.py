@@ -247,6 +247,10 @@ class PythonExpression:
         return eval(self.expression, None, variables)
 
     @classmethod
+    def Lazy(cls, definition: str):
+        return cls(definition, all_variables_allowed=True)
+
+    @classmethod
     def Evaluate(cls, definition: str, values: dict):
         """
         Creates a new `refinery.lib.argformats.PythonExpression` object based on `definition` and
@@ -508,7 +512,7 @@ def LazyPythonExpression(expression: str) -> MaybeDelayedType[Any]:
             if unit.startswith(symbol):
                 expression = match['digits'] + (k * 3 * '0')
                 break
-    parser = PythonExpression(expression, all_variables_allowed=True)
+    parser = PythonExpression.Lazy(expression)
     if parser.variables:
         def evaluate(data: Chunk):
             try:
@@ -958,7 +962,7 @@ class DelayedArgument(LazyEvaluation):
             return obj
         raise ArgumentTypeError(F'The meta variable {name} is of type {type(obj).__name__} and no conversion is known.')
 
-    @handler.register('var', final=True)
+    @handler.register('v', 'var', final=True)
     def var(self, name: str) -> bytes:
         """
         The final handler `var:name` contains the value of the meta variable `name`.
@@ -1131,6 +1135,62 @@ class DelayedArgument(LazyEvaluation):
             return it
         return itertools.cycle(it)
 
+    @handler.register('rng', final=True)
+    def rng(
+        self,
+        size: str,
+    ) -> bytes:
+        """
+        The `rng:count` handler generates `count` secure random bytes using the Python standard
+        library module function `secrets.token_bytes`.
+        """
+        import secrets
+        size = PythonExpression.Lazy(size)
+        try:
+            _size = size()
+        except ParserVariableMissing:
+            def finalize(data):
+                meta = dict(metavars(data))
+                return secrets.token_bytes(size(meta))
+            return finalize
+        else:
+            return secrets.token_bytes(_size)
+
+    @handler.register('prng', final=True)
+    def prng(
+        self,
+        size: str,
+        seed: Optional[str] = None
+    ) -> bytes:
+        """
+        The `prng[seed]:count` handler generates `count` random bytes using Python's built-in random
+        number generator. The `seed` argument can be omitted, in which case the PRNG will be seeded
+        with the current timestamp in nanoseconds.
+        """
+        import random
+        import time
+
+        try:
+            randbytes = random.randbytes
+        except AttributeError:
+            def randbytes(n):
+                return bytearray(random.randint(0, 0xFF) for _ in range(n))
+
+        seed = time.time_ns if seed is None else PythonExpression.Lazy(seed)
+        size = PythonExpression.Lazy(size)
+        try:
+            _size = size()
+            _seed = seed()
+        except ParserVariableMissing:
+            def finalize(data):
+                meta = dict(metavars(data))
+                random.seed(seed(meta))
+                return randbytes(size(meta))
+            return finalize
+        else:
+            random.seed(_seed)
+            return randbytes(_size)
+
     @handler.register('accu', final=True)
     def accu(
         self,
@@ -1177,10 +1237,10 @@ class DelayedArgument(LazyEvaluation):
             except KeyError:
                 raise ArgumentTypeError(F'The generator type {spec} is unknown.')
         update, _, feed = spec.partition('#')
-        update = PythonExpression(update, all_variables_allowed=True)
+        update = PythonExpression.Lazy(update)
         seed = seed or '0'
-        seed = PythonExpression(seed, all_variables_allowed=True)
-        feed = feed and PythonExpression(feed, all_variables_allowed=True)
+        seed = PythonExpression.Lazy(seed)
+        feed = feed and PythonExpression.Lazy(feed)
         skip = 1 if skip is None else int(skip, 0)
         precision = precision and int(precision, 0) or _DEFAULT_BITS
         mask = precision and (1 << precision) - 1
@@ -1254,8 +1314,8 @@ class DelayedArgument(LazyEvaluation):
         integer sequence and assigned back to `S`. The starting value of `S` is given by `seed`,
         which has a default value of `0` and must also be given as a Python expression.
         """
-        seed = seed and PythonExpression(seed, all_variables_allowed=True)
-        reduction = PythonExpression(reduction, all_variables_allowed=True)
+        seed = seed and PythonExpression.Lazy(seed)
+        reduction = PythonExpression.Lazy(reduction)
 
         def finalize(data: Optional[Chunk] = None):
             def _reduction(S, B):
